@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  # app:
+  #   build:
+  #     context: .
+  #   volumes:
+  #     - .:/src
+  #   command: npm run start
+  #   ports:
+  #     - '5000:5000'
+  #   environment:
+  #     NODE_ENV: development
+  #   depends_on:
+  #     - mongodb
+
+  mongodb:
+    image: mongo:latest
+    # environment:
+    #   MONGO_INITDB_ROOT_USERNAME: root
+    #   MONGO_INITDB_ROOT_PASSWORD: root
+    #   MONGO_INITDB_DATABASE: mern_boilerplate
+
+    ports:
+      - 27099:27017
+    restart: unless-stopped
+    volumes:
+      - .docker/data/db:/data/db
