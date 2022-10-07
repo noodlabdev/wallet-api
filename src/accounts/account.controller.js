@@ -64,6 +64,11 @@ const login = catchReqRes(async (req, res) => {
   return res.json({ token });
 });
 
+const getAccounts = catchReqRes(async (req, res) => {
+  const accounts = await Account.find({ wallet: req.user._id });
+  return res.json({ accounts });
+});
+
 const add = catchReqRes(async (req, res) => {
   const mnemonic = hash.decrypt(req.user.mnemonic);
 
@@ -100,7 +105,10 @@ const add = catchReqRes(async (req, res) => {
 const addToken = catchReqRes(async (req, res) => {
   const { address } = req.body;
 
-  let token = await Token.findOne({ address: address.toLowerCase() });
+  let token = await Token.findOne({
+    wallet: req.user._id,
+    address: address.toLowerCase(),
+  });
   if (token) return res.status(401).json({ token: 'Already added' });
 
   const tokenMetadata = await getERC20Metadata(address);
@@ -225,6 +233,7 @@ module.exports = {
   generate,
   login,
   add,
+  getAccounts,
   addToken,
   getTokens,
   getToken,
