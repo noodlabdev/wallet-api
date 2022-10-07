@@ -1,7 +1,7 @@
 const passportJwt = require('passport-jwt');
 
 const envVars = require('./env.config');
-const User = require('../users/user.model');
+const { Wallet } = require('../accounts/models');
 
 const { Strategy, ExtractJwt } = passportJwt;
 
@@ -14,23 +14,19 @@ const passportConfig = (passport) => {
   passport.use(
     new Strategy(opts, (jwtPayload, done) => {
       // eslint-disable-next-line no-underscore-dangle
-      User.findOne({ _id: jwtPayload._id }, (err, user) => {
+      Wallet.findOne({ _id: jwtPayload.walletId }, (err, wallet) => {
         if (err) return done(err, false);
-
-        if (user) return done(null, user);
-
+        if (wallet) return done(null, wallet);
         return done(null, false);
       });
     }),
   );
-
-  passport.serializeUser((user, done) => {
-    done(null, user._id); // eslint-disable-line no-underscore-dangle
+  passport.serializeUser((wallet, done) => {
+    done(null, wallet._id); // eslint-disable-line no-underscore-dangle
   });
-
   passport.deserializeUser((id, done) => {
-    User.findById(id, (err, user) => {
-      done(err, user);
+    Wallet.findById(id, (err, user) => {
+      done(err, wallet);
     });
   });
 };
