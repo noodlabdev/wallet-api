@@ -17,7 +17,8 @@ accountRoute.route('/login').post(login);
 accountRoute.route('/new').post(isAuth, add);
 accountRoute.route('/list').get(isAuth, getAccounts);
 
-accountRoute.route('/tokens').get(isAuth, getTokens).post(isAuth, addToken);
+accountRoute.route('/tokens').post(isAuth, getTokens);
+accountRoute.route('/tokens/new').post(isAuth, addToken);
 accountRoute.route('/tokens/:address').get(isAuth, getToken);
 
 accountRoute.route('/transactions').post(isAuth, sendToken);
