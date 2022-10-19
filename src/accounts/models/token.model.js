@@ -21,6 +21,11 @@ const tokenSchema = mongoose.Schema({
     type: Number,
     required: true,
   },
+  chainId: {
+    type: Number,
+    required: true,
+    unique: true,
+  },
   createdAt: {
     type: Number,
     default: Date.now(),

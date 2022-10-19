@@ -1,9 +1,9 @@
 const jwt = require('jsonwebtoken');
 const { ethers, BigNumber } = require('ethers');
 
-const { loginSchema } = require('./account.validation');
+const accountValidation = require('./account.validation');
 
-const { Account, Wallet, Token } = require('./models');
+const { Account, Wallet, Token, Transaction } = require('./models');
 const { catchReqRes, hash, validateSchema } = require('../utils');
 const { BaseMnemonicPaths } = require('../constants');
 const { envVars } = require('../config');
@@ -11,20 +11,24 @@ const {
   erc20Contract,
   getERC20Metadata,
   getERC20Balances,
-  EthersProvider,
-  NativeCoin,
+  getProvider,
+  getNetwork,
 } = require('../web3');
+const { parseEther, formatEther } = require('ethers/lib/utils');
 
 const WALLET_PASS = '123456';
 
 const generate = catchReqRes((req, res) => {
   const wallet = new ethers.Wallet.createRandom();
-  console.log(wallet);
   return res.json({ mnemonic: wallet.mnemonic.phrase });
 });
 
 const login = catchReqRes(async (req, res) => {
-  // const { error } = TLDVerificationSchema.validate(params);
+  const { isValid, error } = validateSchema(
+    req.body,
+    accountValidation.loginSchema,
+  );
+  if (!isValid) return res.status(400).json({ error });
 
   const { mnemonic } = req.body;
   let mnemonicHash = hash.encrypt(mnemonic);
@@ -103,18 +107,26 @@ const add = catchReqRes(async (req, res) => {
 });
 
 const addToken = catchReqRes(async (req, res) => {
-  const { address } = req.body;
+  const { isValid, error } = validateSchema(
+    req.body,
+    accountValidation.addTokenSchema,
+  );
+  if (!isValid) return res.status(400).json({ error });
+
+  const { address, chainId } = req.body;
 
   let token = await Token.findOne({
     wallet: req.user._id,
     address: address.toLowerCase(),
+    chainId,
   });
   if (token) return res.status(401).json({ token: 'Already added' });
-
-  const tokenMetadata = await getERC20Metadata(address);
+  const tokenMetadata = await getERC20Metadata(address, chainId);
+  if (!tokenMetadata) return res.status(400).json({ error: 'Invalid token' });
   token = new Token({
     wallet: req.user._id,
     address,
+    chainId,
     ...tokenMetadata,
   });
   token.save();
@@ -123,7 +135,13 @@ const addToken = catchReqRes(async (req, res) => {
 });
 
 const getTokens = catchReqRes(async (req, res) => {
-  const { account } = req.body;
+  const { isValid, error } = validateSchema(
+    req.body,
+    accountValidation.getTokensSchema,
+  );
+  if (!isValid) return res.status(400).json({ error });
+
+  const { account, chainId } = req.body;
 
   const _account = await Account.findOne({
     address: account.toLowerCase(),
@@ -135,38 +153,44 @@ const getTokens = catchReqRes(async (req, res) => {
     _account.keystore,
     WALLET_PASS,
   );
-  wallet = wallet.connect(EthersProvider);
+  wallet = wallet.connect(getProvider(chainId));
 
   const nativeBalance = await wallet.getBalance();
 
   const tokens = await Token.find({ wallet: req.user._id }).lean();
   const tokenAddresses = tokens.map((t) => t.address);
-  const balances = await getERC20Balances(account, tokenAddresses);
+  const balances = await getERC20Balances(account, tokenAddresses, chainId);
   const _tokens = tokens.map((t) => ({ ...t, balance: balances[t.address] }));
   res.json({
     tokens: _tokens,
     nativeCoin: {
-      ...NativeCoin,
+      ...getNetwork(chainId),
       balance: ethers.utils.formatEther(nativeBalance),
     },
   });
 });
 
 const getToken = catchReqRes(async (req, res) => {
-  const { address } = req.params;
+  const { isValid, error } = validateSchema(
+    req.params,
+    accountValidation.getTokensSchema,
+  );
+  if (!isValid) return res.status(400).json({ error });
 
-  let token = await Token.findOne({ address: address.toLowerCase() }).select([
-    'address',
-    'name',
-    'symbol',
-    'decimals',
-  ]);
+  const { address, chainId } = req.params;
+
+  let token = await Token.findOne({
+    address: address.toLowerCase(),
+    chainId,
+  }).select(['address', 'name', 'symbol', 'decimals', 'chainId']);
   if (token) return res.json(token);
 
-  const tokenMetadata = await getERC20Metadata(address);
+  const tokenMetadata = await getERC20Metadata(address, chainId);
+  if (!tokenMetadata) return res.status(400).json({ error: 'Invalid token' });
   token = new Token({
     wallet: req.user._id,
     address,
+    chainId,
     ...tokenMetadata,
   });
   token.save();
@@ -175,7 +199,7 @@ const getToken = catchReqRes(async (req, res) => {
 });
 
 const sendToken = catchReqRes(async (req, res) => {
-  const { token, from, to, amount } = req.body;
+  const { token, from, to, amount, chainId } = req.body;
 
   const account = await Account.findOne({
     address: from.toLowerCase(),
@@ -183,50 +207,122 @@ const sendToken = catchReqRes(async (req, res) => {
   });
   if (!account) res.status(400).json({ account: 'Account does not exists' });
 
+  const tokenMetadata = await getERC20Metadata(token, chainId);
+  if (!tokenMetadata) return res.status(400).json({ error: 'Invalid token' });
+
   let wallet = new ethers.Wallet.fromEncryptedJsonSync(
     account.keystore,
     WALLET_PASS,
   );
-  wallet = wallet.connect(EthersProvider);
+  wallet = wallet.connect(getProvider(chainId));
   let tx;
-  if (token.toLowerCase() === NativeCoin.address.toLowerCase()) {
-    const _amount = BigNumber.from(amount);
-    const estimateGas = await EthersProvider.estimateGas({
-      to,
-      value: _amount,
-    });
-    tx = await wallet.sendTransaction({
-      to,
-      value: _amount,
-      gasLimit: estimateGas,
-    });
-  } else {
-    const contract = erc20Contract(token, wallet);
-    const estimateGas = await contract.estimateGas['transfer'](to, amount);
-    tx = await contract['transfer'](to, amount, { gasLimit: estimateGas });
+  const network = getNetwork(chainId);
+  try {
+    if (token.toLowerCase() === network.nativeCoin.address.toLowerCase()) {
+      const _amount = BigNumber.from(amount);
+      const estimateGas = await getProvider(chainId).estimateGas({
+        to,
+        value: _amount,
+      });
+      tx = await wallet.sendTransaction({
+        to,
+        value: _amount,
+        gasLimit: estimateGas,
+      });
+    } else {
+      const contract = erc20Contract(token, wallet);
+      const estimateGas = await contract.estimateGas['transfer'](to, amount);
+      tx = await contract['transfer'](to, amount, { gasLimit: estimateGas });
+    }
+  } catch (error) {
+    console.log(error);
+    return res.status(400).json({ error: error.reason });
   }
 
-  res.json({ transaction: tx });
+  const newTx = new Transaction({
+    account: account._id,
+    from,
+    to,
+    token: {
+      address: token,
+      chainId,
+      ...tokenMetadata,
+    },
+    chainId,
+    amount,
+    data: tx.data,
+    nonce: tx.nonce,
+    gasPrice: tx.gasPrice.toString(),
+    gasLimit: tx.gasLimit.toString(),
+    hash: tx.hash,
+    v: tx.v,
+    r: tx.r,
+    s: tx.s,
+  });
 
-  // const account = await Account.findOne({account: })
+  await newTx.save();
 
-  // let token = await Token.findOne({ address }).select([
-  //   'address',
-  //   'name',
-  //   'symbol',
-  //   'decimals',
-  // ]);
-  // if (token) return res.json(token);
+  res.json(newTx);
+});
 
-  // const tokenMetadata = await getERC20Metadata(address);
-  // token = new Token({
-  //   wallet: req.user._id,
-  //   address,
-  //   ...tokenMetadata,
-  // });
-  // token.save();
+const estimateSendToken = catchReqRes(async (req, res) => {
+  const { token, from, to, amount, chainId } = req.body;
 
-  // res.json({ token });
+  const account = await Account.findOne({
+    address: from.toLowerCase(),
+    wallet: req.user._id,
+  });
+  if (!account) res.status(400).json({ account: 'Account does not exists' });
+
+  const tokenMetadata = await getERC20Metadata(token, chainId);
+  if (!tokenMetadata) return res.status(400).json({ error: 'Invalid token' });
+
+  let wallet = new ethers.Wallet.fromEncryptedJsonSync(
+    account.keystore,
+    WALLET_PASS,
+  );
+  wallet = wallet.connect(getProvider(chainId));
+  let estimateGas;
+  const network = getNetwork(chainId);
+  try {
+    if (token.toLowerCase() === network.nativeCoin.address.toLowerCase()) {
+      const _amount = BigNumber.from(amount);
+      estimateGas = await getProvider(chainId).estimateGas({
+        to,
+        value: _amount,
+      });
+    } else {
+      const contract = erc20Contract(token, wallet);
+      estimateGas = await contract.estimateGas['transfer'](to, amount);
+    }
+  } catch (error) {
+    console.log(error);
+    return res.status(400).json({ error: error.reason });
+  }
+
+  res.json({ estimateGas: formatEther(estimateGas.toString()) });
+});
+
+const getTransactions = catchReqRes(async (req, res) => {
+  const { isValid, error } = validateSchema(
+    req.query,
+    accountValidation.getTokensSchema,
+  );
+  if (!isValid) return res.status(400).json({ error });
+
+  const { account, chainId } = req.query;
+
+  const _account = await Account.findOne({
+    address: account.toLowerCase(),
+    wallet: req.user._id,
+  });
+  if (!_account) res.status(400).json({ account: 'Account does not exists' });
+
+  const transactions = await Transaction.find({
+    account: _account._id,
+    chainId,
+  });
+  res.json(transactions);
 });
 
 module.exports = {
@@ -238,4 +334,6 @@ module.exports = {
   getTokens,
   getToken,
   sendToken,
+  getTransactions,
+  estimateSendToken,
 };

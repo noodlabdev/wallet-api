@@ -10,6 +10,8 @@ const {
   getTokens,
   getToken,
   sendToken,
+  getTransactions,
+  estimateSendToken,
 } = require('./account.controller');
 
 accountRoute.route('/gen').post(generate);
@@ -19,8 +21,13 @@ accountRoute.route('/list').get(isAuth, getAccounts);
 
 accountRoute.route('/tokens').post(isAuth, getTokens);
 accountRoute.route('/tokens/new').post(isAuth, addToken);
-accountRoute.route('/tokens/:address').get(isAuth, getToken);
+accountRoute.route('/tokens/:chainId/:address').get(isAuth, getToken);
 
-accountRoute.route('/transactions').post(isAuth, sendToken);
+accountRoute
+  .route('/transactions')
+  .get(isAuth, getTransactions)
+  .post(isAuth, sendToken);
+
+accountRoute.route('/transactions/estimate').post(isAuth, estimateSendToken);
 
 module.exports = accountRoute;

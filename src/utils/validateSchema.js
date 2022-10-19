@@ -6,7 +6,7 @@ const validateSchema = (payload, schema) => {
   return {
     isValid: !error,
     value,
-    error,
+    error: error?.details.map((e) => e.message),
   };
 };
 
