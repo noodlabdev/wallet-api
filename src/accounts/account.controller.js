@@ -13,6 +13,7 @@ const {
   getERC20Balances,
   getProvider,
   getNetwork,
+  NETWORK_SUPPORTED,
 } = require('../web3');
 const { parseEther, formatEther } = require('ethers/lib/utils');
 
@@ -325,6 +326,10 @@ const getTransactions = catchReqRes(async (req, res) => {
   res.json(transactions);
 });
 
+const getNetworks = catchReqRes(async (req, res) => {
+  res.json({ networks: NETWORK_SUPPORTED });
+});
+
 module.exports = {
   generate,
   login,
@@ -336,4 +341,5 @@ module.exports = {
   sendToken,
   getTransactions,
   estimateSendToken,
+  getNetworks,
 };

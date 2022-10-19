@@ -12,12 +12,14 @@ const {
   sendToken,
   getTransactions,
   estimateSendToken,
+  getNetworks,
 } = require('./account.controller');
 
 accountRoute.route('/gen').post(generate);
 accountRoute.route('/login').post(login);
 accountRoute.route('/new').post(isAuth, add);
 accountRoute.route('/list').get(isAuth, getAccounts);
+accountRoute.route('/networks').get(isAuth, getNetworks);
 
 accountRoute.route('/tokens').post(isAuth, getTokens);
 accountRoute.route('/tokens/new').post(isAuth, addToken);
