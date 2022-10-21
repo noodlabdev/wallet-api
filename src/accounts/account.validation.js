@@ -13,7 +13,8 @@ const getTokensSchema = Joi.object({
     .required(),
   chainId: Joi.number()
     .valid(...CHAIN_ID_SUPPORTED)
-    .label('Invalid chainId'),
+    .label('Invalid chainId')
+    .required(),
 });
 
 const addTokenSchema = Joi.object({
